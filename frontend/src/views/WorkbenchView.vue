@@ -86,6 +86,25 @@
       </form>
     </div>
 
+    <div v-if="pendingAction" class="modal-backdrop" data-testid="action-params-modal">
+      <form class="modal" @submit.prevent="submitPendingAction">
+        <h3>{{ pendingAction.action }} · {{ meta.entity }} #{{ pendingAction.row.id }}</h3>
+        <p class="page-desc">开始评估必须关联一份仍有效的调查交割清单，并指定其中一条巡护日志。</p>
+        <label class="create-field">
+          <span>交割编号</span>
+          <input v-model="pendingAction.handoverNo" data-testid="action-handover-no" placeholder="例如 JH-20261128-0001" required />
+        </label>
+        <label class="create-field">
+          <span>关联巡护日志 id（可留空取首条）</span>
+          <input v-model="pendingAction.patrolId" data-testid="action-patrol-id" />
+        </label>
+        <div class="page-actions">
+          <button class="btn" type="button" @click="pendingAction = null">取消</button>
+          <button class="btn primary" data-testid="submit-action" type="submit">确认</button>
+        </div>
+      </form>
+    </div>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -102,6 +121,7 @@ import {
   listEntries,
   moduleMeta,
   runAction as applyAction,
+  runActionWithParams,
 } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
 
@@ -115,6 +135,7 @@ const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const pendingAction = ref<{ action: string; row: EntryRow; handoverNo: string; patrolId: string } | null>(null)
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
@@ -167,9 +188,35 @@ async function submitCreate() {
 
 async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
+  // 威胁评估「开始评估」需要交割编号等业务参数，先用弹窗收集再提交。
+  if (meta.key === 'threat_assessment' && action === '开始评估') {
+    pendingAction.value = {
+      action,
+      row,
+      handoverNo: String(row.交割编号 ?? ''),
+      patrolId: '',
+    }
+    return
+  }
   try {
     const result = await applyAction(meta.key, Number(row.id), action)
     if (!result.ok) throw new Error(result.message)
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '操作失败'
+  }
+}
+
+async function submitPendingAction() {
+  if (!pendingAction.value) return
+  const { action, row, handoverNo, patrolId } = pendingAction.value
+  errorMessage.value = ''
+  try {
+    const params: Record<string, unknown> = { handover_no: handoverNo.trim() }
+    if (patrolId.trim()) params.patrol_id = Number(patrolId)
+    const result = await runActionWithParams(meta.key, Number(row.id), action, params)
+    if (!result.ok) throw new Error(result.message)
+    pendingAction.value = null
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '操作失败'

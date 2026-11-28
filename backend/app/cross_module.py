@@ -110,11 +110,19 @@ def analyze_behavior_for_data_analysis(species_name: str) -> dict[str, Any]:
 
 
 def trigger_threat_from_patrol(patrol_id: int) -> dict[str, Any]:
-    """当巡护记录发现威胁时，自动创建对应的威胁评估条目。"""
+    """当巡护记录发现威胁时，自动创建对应的威胁评估条目。
+
+    只有已审阅的巡护日志才能成为签发证据；草稿在此被拒绝，避免未复核材料流入评估。
+    """
     from app.store import store
     patrol = store.find("patrol_record", patrol_id)
     if not patrol:
         return {"error": f"巡护记录 {patrol_id} 不存在"}
+    if patrol.get("status") != "已审阅":
+        return {
+            "error": f"巡护记录 {patrol_id} 尚未审阅（当前 {patrol.get('status')}），不能作为评估证据",
+            "patrol_status": patrol.get("status"),
+        }
     threat_type = str(patrol.get("威胁类型", ""))
     finding = str(patrol.get("发现情况", ""))
     if not threat_type or threat_type in ("无", "正常", "安全"):
@@ -132,6 +140,10 @@ def trigger_threat_from_patrol(patrol_id: int) -> dict[str, Any]:
         "评估人": str(patrol.get("巡护人员", "系统")),
         "评估日期": str(patrol.get("巡护日期", date.today().isoformat())),
         "备注说明": f"由巡护记录 #{patrol_id} 自动触发",
+        "交割编号": "",
+        "复核依据": "",
+        "有效威胁位置": "",
+        "有效坐标描述": "",
         "status": "待评估",
         "pending": True,
         "abnormal": bool(patrol.get("abnormal")),

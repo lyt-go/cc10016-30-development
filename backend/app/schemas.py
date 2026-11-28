@@ -29,3 +29,5 @@ class EntryPayload(BaseModel):
 class ActionPayload(BaseModel):
     action: str
     remark: str | None = None
+    # 需要业务参数的动作用它携带，例如「开始评估」时的交割编号与巡护日志。
+    params: dict[str, Any] = Field(default_factory=dict)
